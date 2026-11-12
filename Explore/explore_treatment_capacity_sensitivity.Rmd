@@ -1,0 +1,366 @@
+---
+title: "Treatment capacity sensitivity: logic and checks"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+# Run from the project root regardless of RStudio's knit-directory setting.
+knitr::opts_knit$set(root.dir = here::here())
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r load, include=FALSE}
+source("setup.R")
+
+# TEMPORARY: get_wsd(rapid = TRUE) doesn't drop the new "consecutive" source type yet
+# (park-run systems that buy piped water). Remove this filter once npswavacore's
+# get_wsd() excludes it along with municipal, hauled, tribal, and purchased.
+water_supplies <- get_wsd(rapid = TRUE) |>
+  dplyr::filter(coalesce(source_type, "") != "consecutive")
+
+treatment <- calc_treatment_capacity_sensitivity(water_supplies)
+
+# The same calculation with no coastal sources, to see what the reverse osmosis rule changes
+no_coast_file <- tempfile(fileext = ".csv")
+write_csv(tibble(wsd_source_id = character(), coast_dist_m = numeric()), no_coast_file)
+treatment_no_coast <- calc_treatment_capacity_sensitivity(water_supplies, coast_geometry = no_coast_file,
+                                                          verbose = FALSE)
+
+treatment <- treatment |>
+  left_join(select(treatment_no_coast, wsd_source_id, score_without_coastal_rule = raw_treatment_capacity),
+            by = "wsd_source_id") |>
+  mutate(score = factor(raw_treatment_capacity, levels = 0:5))
+
+# Results with source locations, for maps
+treatment_sf <- water_supplies |>
+  distinct(wsd_source_id, .keep_all = TRUE) |>
+  select(wsd_source_id) |>
+  inner_join(treatment, by = "wsd_source_id")
+
+show_table <- function(data, height = NULL, ...) {
+  table <- data |>
+    kable(digits = 2, format.args = list(big.mark = ","), ...) |>
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+  if (is.null(height)) table else scroll_box(table, height = height)
+}
+
+# 0 = least treatment capacity (most sensitive)
+score_colors <- c("0" = "#8C2B0E", "1" = "#CB7223", "2" = "#DFCB34",
+                  "3" = "#9BBF85", "4" = "#289A84", "5" = "#1F5F8B")
+
+score_map <- function(data, label) {
+  data <- mutate(data, score = droplevels(score))
+  mapview(data, zcol = "score", layer.name = label, map.types = "Esri.WorldTopoMap",
+          col.regions = unname(score_colors[levels(data$score)]))
+}
+```
+
+## Purpose
+
+This indicator scores how much treatment capacity each water supply has, from
+**0 (no or unknown treatment)** to **5 (full treatment train for its source type)**.
+Systems with more treatment can better handle the water quality changes that climate
+change may bring, such as more turbidity after fire or floods, warmer water, and
+saltwater intrusion. So a higher score means **lower sensitivity**, and the `norm_`
+and `rank_` columns are inverted (higher = more sensitive).
+
+The method comes from Lynette Schwanger's exploration
+(`NPS_WSD/archive/exploration/NPS_WSD_Treatment_Indicator.Rmd`), adapted to the rapid
+water supply list and conventions. With the same coastal flag, the function reproduces
+her scores for every source it scores. The changes from her version are:
+
+- It uses `get_wsd(rapid = TRUE)`, so municipal, purchased, hauled, tribal, and
+  consecutive sources aren't included.
+- Inactive, non-potable, and proposed sources aren't scored. Temporarily inactive
+  sources are scored, since they're recent or possibly temporary closures.
+- Coastal sources are identified with the rapid `coast_dist_m` (source within 50 km of
+  the NOAA CUSP shoreline), instead of park centroids within 50 km of the TIGER coastline.
+- Unknown treatment scores 0, as before, but is flagged in `treatment_unknown`.
+
+## Step 1: Which sources are scored
+
+Every rapid source is returned. Sources that can't be scored get `NA` with the reason
+in `score_note`.
+
+```{r step1}
+treatment |>
+  mutate(Status = coalesce(score_note, "Scored")) |>
+  count(Status, name = "Sources") |>
+  arrange(Status != "Scored", desc(Sources)) |>
+  show_table()
+```
+
+## Step 2: Map treatments to categories
+
+`treatment_system_type` can list several treatments. Each one is mapped to one or more
+treatment categories:
+
+```{r step2-map}
+category_lookup <- enframe(treatment_category_lookup(), name = "Treatment type", value = "Categories")
+
+treatment_counts <- treatment |>
+  filter(!is.na(treatment_system_type)) |>
+  separate_rows(treatment_system_type, sep = "[,;]") |>
+  mutate(treatment_system_type = str_squish(treatment_system_type)) |>
+  count(`Treatment type` = treatment_system_type, name = "Rapid sources")
+
+category_lookup |>
+  left_join(treatment_counts, by = "Treatment type") |>
+  mutate(`Rapid sources` = replace_na(`Rapid sources`, 0L)) |>
+  arrange(Categories, `Treatment type`) |>
+  show_table(height = "450px", caption = "Treatment category map")
+```
+
+```{r step2-categories}
+treatment |>
+  filter(is.na(score_note), !treatment_unknown) |>
+  separate_rows(treatment_category, sep = ",\\s*") |>
+  count(Category = treatment_category, name = "Sources") |>
+  arrange(desc(Sources)) |>
+  show_table(caption = "Treatment categories on scored sources")
+```
+
+**Check:** treatment types that aren't in the category map are listed here. They're
+ignored in scoring, and the function warns about them.
+
+```{r step2-unmatched}
+unmatched <- treatment |>
+  filter(str_detect(coalesce(treatment_category, ""), "unmatched"))
+
+if (nrow(unmatched) == 0) {
+  cat("None: every treatment type on the rapid list is in the category map.")
+} else {
+  unmatched |> select(wsd_source_id, treatment_system_type) |> show_table()
+}
+```
+
+## Step 3: Score by source type
+
+Groundwater and surface water need different treatment trains, so each source is scored
+on a track. GWUDI (groundwater under the direct influence of surface water), spring,
+and rainwater sources are scored on both tracks and keep the higher score.
+
+```{r step3-rules}
+tribble(
+  ~Score, ~Groundwater, ~`Surface water`,
+  "5", "Oxidation + filtration + disinfection + an add-on (sediment, contaminant, pH, or corrosion)",
+       "Sediment removal + filtration + disinfection + an add-on (oxidation, contaminant, pH, or corrosion)",
+  "4", "Oxidation + filtration + disinfection", "Sediment removal + filtration + disinfection",
+  "3", "Filtration + disinfection", "Filtration + disinfection",
+  "2", "Filtration or disinfection", "Filtration or disinfection",
+  "1", "Only emergency, oxidation, sediment, contaminant, pH, or corrosion treatment", "Same",
+  "0", "Untreated or unknown", "Untreated or unknown"
+) |>
+  show_table(caption = "Scores 4 and 5 also need reverse osmosis if the source is coastal (Step 4)")
+```
+
+```{r step3-tracks}
+treatment |>
+  filter(is.na(score_note)) |>
+  count(Track = scoring_track, `Source type` = source_type, name = "Sources") |>
+  show_table()
+```
+
+## Step 4: Coastal sources need reverse osmosis
+
+Coastal sources face saltwater intrusion, so they need reverse osmosis (RO) to score
+4 or 5. A coastal source with a full treatment train but no RO scores 3. A source is
+coastal if it's within 50 km of the NOAA CUSP shoreline (`coast_dist_m` from
+`process_coastal_geometry()`, the same input as the storm surge and saltwater intrusion
+indicators).
+
+```{r step4-counts}
+treatment |>
+  filter(is.na(score_note)) |>
+  summarize(`Coastal sources` = sum(coastal),
+            `With reverse osmosis` = sum(coastal & has_reverse_osmosis),
+            `Lowered by the coastal rule` = sum(raw_treatment_capacity < score_without_coastal_rule)) |>
+  show_table()
+```
+
+```{r step4-lowered}
+treatment |>
+  filter(raw_treatment_capacity < score_without_coastal_rule) |>
+  transmute(Source = wsd_source_id, Park = park_unit, `Source type` = source_type,
+            Treatment = treatment_system_type,
+            `Distance to coast (km)` = coast_dist_m / 1000,
+            Score = raw_treatment_capacity, `Score without coastal rule` = score_without_coastal_rule) |>
+  show_table(caption = "Sources whose score was lowered by the coastal rule")
+```
+
+```{r step4-map}
+mapview(filter(treatment_sf, is.na(score_note), coastal),
+        zcol = "has_reverse_osmosis", layer.name = "Coastal sources: reverse osmosis",
+        map.types = "Esri.WorldTopoMap", col.regions = c("#8C2B0E", "#1F5F8B"))
+```
+
+## Results
+
+```{r results-counts}
+treatment |>
+  filter(is.na(score_note)) |>
+  count(Score = raw_treatment_capacity, Track = scoring_track) |>
+  pivot_wider(names_from = Track, values_from = n, values_fill = 0) |>
+  left_join(treatment |> filter(is.na(score_note)) |> count(Score = raw_treatment_capacity, name = "All sources"),
+            by = "Score") |>
+  show_table(caption = "Scored sources by treatment capacity score and track")
+```
+
+```{r results-map}
+score_map(filter(treatment_sf, is.na(score_note)), "Treatment capacity score")
+```
+
+### Unknown treatment
+
+These sources have no `treatment_system_type` in the WSD (blank or "U"), so they score 0,
+which assumes minimum treatment capacity. Leaving them `NA` would count as zero
+vulnerability in `calc_vulnerability_index()`, the same as the best-treated systems.
+Filling in the WSD would improve these scores.
+
+```{r unknown-map}
+score_map(filter(treatment_sf, treatment_unknown), "Unknown treatment (scored 0)")
+```
+
+```{r unknown-parks}
+treatment |>
+  filter(treatment_unknown) |>
+  count(Park = park_unit, Classification = classification, name = "Sources") |>
+  arrange(desc(Sources)) |>
+  show_table(height = "350px", caption = "Sources with unknown treatment by park")
+```
+
+## Distribution of indicator values
+
+```{r dist-setup}
+scored <- filter(treatment, is.na(score_note))
+
+bar_color <- "#1F5F8B"
+
+dist_theme <- theme_minimal(base_size = 12) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(color = "grey30"),
+        strip.text = element_text(face = "bold", hjust = 0))
+
+score_counts <- scored |> count(raw_treatment_capacity)
+pct <- function(scores) round(100 * mean(scored$raw_treatment_capacity %in% scores))
+
+park_scores <- scored |>
+  group_by(park_unit) |>
+  summarize(mean_score = mean(raw_treatment_capacity), sources = n(),
+            unknown_share = mean(treatment_unknown))
+
+score_2 <- filter(scored, raw_treatment_capacity == 2)
+disinfection_only_pct <- round(100 * mean(str_detect(score_2$treatment_category, "disinfection") &
+                                            !str_detect(score_2$treatment_category, "filtration")))
+```
+
+The score is ordinal with only six values, so its distribution is shown as counts per
+score. It is strongly concentrated: score 2 (filtration *or* disinfection; `r disinfection_only_pct`% of these
+are disinfection alone) holds `r pct(2)`% of scored sources, `r pct(0)`% score 0, and only
+`r pct(4:5)`% reach 4 or 5. Because `norm_treatment_capacity` is a linear rescale of the
+score, it has the same shape, just relabeled from 1.0 (score 0) to 0.0 (score 5).
+
+```{r dist-raw, fig.width = 7, fig.height = 4}
+ggplot(score_counts, aes(x = factor(raw_treatment_capacity), y = n)) +
+  geom_col(fill = bar_color, width = 0.7) +
+  geom_text(aes(label = n), vjust = -0.4, size = 3.5, color = "grey20") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = "Treatment capacity score (0 = none or unknown, 5 = full train)",
+       y = "Scored sources",
+       title = "Most sources score 2: disinfection without filtration") +
+  dist_theme
+```
+
+### By scoring track and unknown treatment
+
+Surface water sources score higher than groundwater, because most surface systems
+have both filtration and disinfection while most groundwater systems only disinfect.
+The score-0 bar is mostly unknown treatment rather than confirmed untreated sources.
+
+```{r dist-track, fig.width = 9, fig.height = 4}
+scored |>
+  mutate(track = factor(scoring_track, levels = c("Groundwater", "Surface water", "Both (higher score)"))) |>
+  count(track, raw_treatment_capacity) |>
+  complete(track, raw_treatment_capacity = 0:5, fill = list(n = 0)) |>
+  ggplot(aes(x = factor(raw_treatment_capacity), y = n)) +
+  geom_col(fill = bar_color, width = 0.7) +
+  facet_wrap(~ track, scales = "free_y") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = "Treatment capacity score", y = "Scored sources",
+       title = "Score distribution by scoring track (y-axes differ)") +
+  dist_theme
+```
+
+```{r dist-unknown}
+scored |>
+  filter(raw_treatment_capacity == 0) |>
+  count(Reason = if_else(treatment_unknown, "Unknown treatment", "Listed as untreated"),
+        name = "Sources scoring 0") |>
+  show_table()
+```
+
+### By park
+
+Scores summarized per park, using each park's mean score across its scored sources.
+The tall bar (2 to 2.25) is mostly parks where every scored source scores 2 (`r sum(park_scores$mean_score == 2)` parks), matching the source-level pattern; parks well below 2 usually
+have many unknown or untreated sources.
+
+```{r dist-park, fig.width = 7, fig.height = 4}
+ggplot(park_scores, aes(x = mean_score)) +
+  geom_histogram(binwidth = 0.25, boundary = 0, closed = "left", fill = bar_color, color = "white", linewidth = 0.5) +
+  scale_x_continuous(breaks = 0:5, limits = c(0, 5)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
+  labs(x = "Mean treatment capacity score per park", y = "Parks",
+       title = paste0("Park mean scores (", nrow(park_scores), " parks)")) +
+  dist_theme
+```
+
+```{r dist-park-low}
+park_scores |>
+  filter(mean_score < 1) |>
+  arrange(mean_score) |>
+  transmute(Park = park_unit, `Scored sources` = sources,
+            `Mean score` = mean_score, `Unknown treatment (%)` = 100 * unknown_share) |>
+  show_table(caption = "Parks with a mean score below 1")
+```
+
+## Checks
+
+```{r checks}
+scored <- filter(treatment, is.na(score_note))
+
+tibble(
+  Check = c("One row per rapid source",
+            "Scores are whole numbers from 0 to 5",
+            "Inactive, non-potable, and proposed sources are NA",
+            "Score 0 has the highest normalized value (most sensitive)",
+            "Score 5 has the lowest normalized value (least sensitive)",
+            "Unknown treatment only on scored sources"),
+  Result = c(
+    nrow(treatment) == n_distinct(water_supplies$wsd_source_id) & !any(duplicated(treatment$wsd_source_id)),
+    all(scored$raw_treatment_capacity %in% 0:5),
+    all(is.na(treatment$raw_treatment_capacity[!is.na(treatment$score_note)])),
+    all(scored$norm_treatment_capacity[scored$raw_treatment_capacity == 0] == max(scored$norm_treatment_capacity)),
+    all(scored$norm_treatment_capacity[scored$raw_treatment_capacity == 5] == min(scored$norm_treatment_capacity)),
+    all(is.na(treatment$score_note[treatment$treatment_unknown]))
+  )
+) |>
+  mutate(Result = if_else(Result, "Pass", "FAIL")) |>
+  show_table()
+```
+
+Normalized and ranked values for each score. Ranks are percentiles, so many tied scores
+share one rank and the top rank is below 100.
+
+```{r checks-standardized}
+scored |>
+  group_by(Score = raw_treatment_capacity) |>
+  summarize(Sources = n(),
+            Normalized = first(norm_treatment_capacity),
+            Rank = first(rank_treatment_capacity)) |>
+  show_table()
+```

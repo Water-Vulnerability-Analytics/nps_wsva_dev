@@ -349,3 +349,21 @@ process_waterrightsindicator_data(
   verbose    = TRUE) 
 ```
 
+
+# Process EPA SDWA Public Water Systems
+
+Saves the EPA SDWA public water system attributes that `calc_service_reach()` reads
+(population served, type, owner, primary source, and activity status) to
+`data/rapid/inputs/sdwa_public_water_systems.csv`. Uses the SDWA zip already in
+`data/all/Water_Supply/` and downloads it only if it's missing. Set `overwrite = TRUE` to
+download EPA's current release (over 500 MB). The saved table records the release
+(`SUBMISSIONYEARQUARTER`) and the download date.
+
+```{r}
+process_sdwa_data(
+  dest_dir   = npswavacore::wava_data_path("all", "Water_Supply"),
+  output_dir = npswavacore::wava_data_path("rapid", "inputs"),
+  overwrite  = FALSE,
+  save       = TRUE,
+  verbose    = TRUE)
+```

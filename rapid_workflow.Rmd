@@ -20,7 +20,11 @@ parks <- get_park_system()
 Read in water supply database for filtered parks
 
 ```{r}
-water_supplies <- get_wsd(rapid = TRUE) 
+# TEMPORARY: get_wsd(rapid = TRUE) doesn't drop the new "consecutive" source type yet
+# (park-run systems that buy piped water). Remove this filter once npswavacore's
+# get_wsd() excludes it along with municipal, hauled, tribal, and purchased.
+water_supplies <- get_wsd(rapid = TRUE) |>
+  dplyr::filter(coalesce(source_type, "") != "consecutive")
 ```
 
 Save water supplies to app data
@@ -430,6 +434,20 @@ temp_sen <- calc_temp_sensitivity(water_supplies,
                                   verbose = TRUE)
 ```
 
+
+### Treatment Capacity
+
+Scores treatment capacity from the WSD `treatment_system_type` (0 = untreated or unknown, 5 = full treatment train for the source type; coastal sources need reverse osmosis for 4-5). Higher raw = less sensitive, so norm_/rank_ are inverted. Inactive, non-potable, and proposed sources are NA. See `Explore/explore_treatment_capacity_sensitivity.Rmd`.
+
+```{r}
+treatment_sen <- calc_treatment_capacity_sensitivity(water_supplies = water_supplies,
+                                                     coast_geometry = here("data", "rapid", "inputs", "coast_comp", "coastal_site_geometry.csv"),
+                                                     save = TRUE,
+                                                     output_dir = "data/rapid/outputs/",
+                                                     verbose = TRUE)
+```
+
+
 ### Consecutive Dry and Wet Periods
 
 Historical CDD and CWD sensitivity uses Sen's slope for each historical LOCA2
@@ -549,6 +567,18 @@ storm_surge_sen <- calc_storm_surge_sensitivity(water_supplies = water_supplies,
                                                 output_dir = here("data", "rapid", "outputs"),
                                                 verbose = TRUE)
 ```
+
+
+# Service Reach
+
+Not a scored indicator: describes each water supply's service reach (Wide, Moderate, Focused, Not assessed) from the people it serves and its role at the park, used to filter or add context to the results. Uses the point `water_supplies`, not the buffer, and downloads park visitation, so it needs internet. See `Explore/explore_service_reach.Rmd` for the logic.
+
+```{r}
+service_reach <- calc_service_reach(water_supplies = water_supplies,
+                                    save = TRUE,
+                                    output_dir = "data/rapid/outputs/")
+```
+
 
 # Testing
 

@@ -7,3 +7,4 @@
 data
 tests/testthat/fixtures/golden/
 tests/testthat/_snaps/**/*.new.*
+.positai
