@@ -36,6 +36,15 @@ From the USGS CMIP6-LOCA2 threshold metrics (Alder 2024,
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 source("setup.R")
 mapviewOptions(fgb = FALSE)
+
+# NPS Park Tiles basemaps need the token that nps_basemap_token() reads from
+# the NPS_BASEMAP_TOKEN environment variable (see the README). If it isn't
+# set, the map falls back to mapview's default basemaps so the file still
+# renders.
+use_nps_basemaps <- tryCatch({
+  nps_basemap_token()
+  TRUE
+}, error = function(e) FALSE)
 ```
 
 ```{r calc-exposure}
@@ -72,15 +81,17 @@ baseline climate in opposite ways:
   above 25 °C today) and is smaller at both the coldest (~36) and hottest
   (~29) sites.
 
+`r if (!use_nps_basemaps) "*NPS Park Tiles are not shown because NPS_BASEMAP_TOKEN is not set; the map uses mapview's default basemaps.*"`
+
 ```{r map-change}
-add_nps_basemaps(
-  mapview(exp_sf, zcol = "raw_su_change_p90", layer.name = "SU change p90 (days)",
-          map.types = NULL) +
-    mapview(exp_sf, zcol = "raw_gdd10_change_p90", layer.name = "GDD10 change p90 (C d)",
-            map.types = NULL, hide = TRUE) +
-    mapview(exp_sf, zcol = "raw_gsl_change_p90", layer.name = "GSL change p90 (days)",
-            map.types = NULL, hide = TRUE)
-)
+change_map <- mapview(exp_sf, zcol = "raw_su_change_p90", layer.name = "SU change p90 (days)",
+                      map.types = NULL) +
+  mapview(exp_sf, zcol = "raw_gdd10_change_p90", layer.name = "GDD10 change p90 (C d)",
+          map.types = NULL, hide = TRUE) +
+  mapview(exp_sf, zcol = "raw_gsl_change_p90", layer.name = "GSL change p90 (days)",
+          map.types = NULL, hide = TRUE)
+
+if (use_nps_basemaps) add_nps_basemaps(change_map) else change_map
 ```
 
 # RECOMMENDATION: SU (DAYS ABOVE 25 °C)
