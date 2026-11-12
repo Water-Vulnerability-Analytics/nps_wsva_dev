@@ -177,23 +177,51 @@ walk(precip_data, ~try(process_loca2_mwbm(.x,
 # took 57 minutes
 ```
 
-### Consecutive Dry and Wet Periods
-
-Extract the annual maximum consecutive dry-day (CDD) and wet-day (CWD) spell
-lengths from the revised LOCA2 precipitation-extremes dataset.
+### Consecutive Dry and Wet Periods and Flood Metrics
 
 ```{r}
-precip_period_data <- list.files("data/all/loca_cmip6_precip_products/",
+precip_period_data <- list.files("data/all/loca_cmip6_ext_precip_products/",
                                  full.names = TRUE,
                                  recursive = TRUE,
                                  pattern = "\\.nc$")
 
-walk(precip_period_data, ~ process_precip_period_data(nc_path = .x,
-                                                      water_supplies = water_supplies |>
-                                                        select(park_unit, wsd_source_id),
-                                                      output_dir = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
-                                                      overwrite = FALSE,
-                                                      verbose = TRUE))
+walk(precip_period_data, ~ process_extreme_precip_data(nc_path = .x,
+                                                       water_supplies = water_supplies |>
+                                                         select(park_unit, wsd_source_id),
+                                                       # Only Dry Tortugas has no LOCA2 data in its 3 x 3
+                                                       # block; the nearest cell with data is 178-181 km away
+                                                       # on the Florida mainland, inside the 200 km default.
+                                                       grab_nearest = TRUE,
+                                                       output_dir = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                                       overwrite = TRUE,
+                                                       verbose = TRUE))
+```
+
+### Temperature-Threshold Metrics (Warm-Water Surrogates)
+
+Extract the three yearly temperature-threshold metrics used by
+`calc_temp_threshold_exposure()` from the CMIP6-LOCA2 thresholds collection
+(Alder 2024, <https://doi.org/10.5066/P13OV6GY>): `SU` (summer days, maximum
+above 25 C), `GDD10` (growing degree days above 10 C) and `GSL` (growing season
+length). Each metric is one `.tar.gz` with a NetCDF file per model, scenario and
+run, holding the historical run (1950-2014) and the scenario (2015-2100) in one
+series. The archives are extracted to a local temporary folder, not the synced
+data folder (GDD10 alone is about 9 GB), and each file is deleted once
+processed. Files already processed are skipped without extracting them.
+
+```{r}
+temp_threshold_archives <- list.files("data/all/loca_cmip6_ext_temperature_products/",
+                                      full.names = TRUE,
+                                      pattern = "\\.tar\\.gz$")
+
+walk(temp_threshold_archives, ~ process_temp_threshold_metrics(path = .x,
+                                                               water_supplies = water_supplies |>
+                                                                 select(park_unit, wsd_source_id),
+                                                               # So Dry Tortugas gets SFlorida data.
+                                                               grab_nearest = TRUE,
+                                                               output_dir = "data/rapid/inputs/loca_cmip6_temp_threshold_water_supplies/",
+                                                               overwrite = TRUE,
+                                                               verbose = TRUE))
 ```
 
 ### Snow Water Equivalent
@@ -348,4 +376,3 @@ process_waterrightsindicator_data(
   output_dir = here("data", "rapid", "inputs", "WaterRightsIndicator"),
   verbose    = TRUE) 
 ```
-

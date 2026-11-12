@@ -49,12 +49,16 @@
 #'   created if it doesn't exist. Required.
 #' @param grab_nearest Logical. What to do when none of a site's 3 x 3 cells
 #'   has data (e.g. a coastal site over water).
-#'   * `TRUE`: moves the block to the nearest cell with data within 50 km and
-#'     uses its 3 x 3 neighborhood instead. Sites with no data within 50 km
-#'     keep `NA`.
+#'   * `TRUE`: moves the block to the nearest cell with data within
+#'     `nearest_max_km` and uses its 3 x 3 neighborhood instead. Sites with no
+#'     data within that distance keep `NA`.
 #'   * `FALSE`: keeps the site with `NA` values.
 #'
 #'   Default: `FALSE`.
+#' @param nearest_max_km Numeric. The farthest, in km, `grab_nearest` looks for
+#'   a cell with data. Ignored when `grab_nearest = FALSE`. Default: `200`,
+#'   which reaches Dry Tortugas, about 180 km from the nearest LOCA2 cell with
+#'   data.
 #'
 #' @return `NULL`, invisibly. Called for the parquet file it writes.
 #' @export
@@ -79,7 +83,14 @@ process_loca2_mwbm <- function(nc_path,
                                historical = c("1980-01-01", "2024-12-31"),
                                future = c("2035-01-01", "2065-12-31"),
                                output_dir,
-                               grab_nearest = FALSE){
+                               grab_nearest = FALSE,
+                               nearest_max_km = 200){
+
+  stopifnot(
+    "nearest_max_km must be one positive number" =
+      is.numeric(nearest_max_km) && length(nearest_max_km) == 1L &&
+        is.finite(nearest_max_km) && nearest_max_km > 0
+  )
 
   supported_vars <- c(
     "aet",
@@ -359,8 +370,8 @@ process_loca2_mwbm <- function(nc_path,
       search_cells <- dplyr::bind_rows(lapply(missing_point_ids, function(point_id) {
         point_lon <- xy[point_id, 1]
         point_lat <- xy[point_id, 2]
-        lat_buffer <- 50 / 111.32
-        lon_buffer <- 50 / (111.32 * max(abs(cos(point_lat * pi / 180)), 1e-6))
+        lat_buffer <- nearest_max_km / 111.32
+        lon_buffer <- nearest_max_km / (111.32 * max(abs(cos(point_lat * pi / 180)), 1e-6))
         candidate_lons <- which(abs(lon - point_lon) <= lon_buffer)
         candidate_lats <- which(abs(lat - point_lat) <= lat_buffer)
 
@@ -374,7 +385,7 @@ process_loca2_mwbm <- function(nc_path,
           cbind(lon[candidates$lon_index], lat[candidates$lat_index]),
           c(point_lon, point_lat)
         )
-        candidates <- candidates[candidates$distance_m <= 50000, , drop = FALSE]
+        candidates <- candidates[candidates$distance_m <= nearest_max_km * 1000, , drop = FALSE]
         if (!nrow(candidates)) return(NULL)
         candidates$point_id <- point_id
         candidates

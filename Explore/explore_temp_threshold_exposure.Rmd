@@ -1,0 +1,116 @@
+---
+title: "Warm-Water Temperature Exposure (LOCA2 SU, GDD10, GSL)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+Goal: one temperature indicator that flags surface-water supplies where warming
+pushes water toward the temperatures at which cyanobacteria blooms take off
+(growth optima of roughly 25 °C and above). All comparisons use the p90
+(high-end) projected change.
+
+# TERMS
+
+From the USGS CMIP6-LOCA2 threshold metrics (Alder 2024,
+<https://doi.org/10.5066/P13OV6GY>), computed with the CLIMDEX indices.
+
+- **SU (summer days):** the number of days in a year with a maximum air
+  temperature above 25 °C. Days.
+- **GDD10 (growing degree days, base 10 °C):** the year's accumulated warmth
+  above 10 °C, i.e. each day's mean temperature minus 10 °C, summed over the
+  days warmer than 10 °C. °C-days. (The data files label it only "base 10C";
+  this is the standard formula.)
+- **GSL (growing season length):** the number of days between the first run of
+  at least 6 days with a mean temperature above 5 °C and the first run of 6
+  days below 5 °C after 1 July. Days, so it cannot exceed 365.
+- **Change, p90:** for each model run, the future (2035-2065) mean minus the
+  historical (1980-2010) mean; p90 is the run nearest the 90th percentile of
+  those changes.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+source("setup.R")
+mapviewOptions(fgb = FALSE)
+
+# NPS Park Tiles basemaps need the token that nps_basemap_token() reads from
+# the NPS_BASEMAP_TOKEN environment variable (see the README). If it isn't
+# set, the map falls back to mapview's default basemaps so the file still
+# renders.
+use_nps_basemaps <- tryCatch({
+  nps_basemap_token()
+  TRUE
+}, error = function(e) FALSE)
+```
+
+```{r calc-exposure}
+water_supplies <- get_wsd(rapid = TRUE)
+
+temp_threshold_exp <- calc_temp_threshold_exposure(water_supplies = water_supplies,
+                                                   historical = c(1980, 2010),
+                                                   future = c(2035, 2065),
+                                                   verbose = FALSE)
+
+exp_sf <- water_supplies |>
+  left_join(temp_threshold_exp, by = c("wsd_source_id", "park_unit"))
+```
+
+# DO THEY CORRELATE?
+
+```{r correlation}
+cor(temp_threshold_exp[, c("raw_su_change_p90",
+                           "raw_gdd10_change_p90",
+                           "raw_gsl_change_p90")],
+    use = "complete.obs", method = "spearman")
+```
+
+No. In the 2026-11-11 run (1,425 supplies) every pair was weak to negative
+(Spearman -0.34 to 0.12), so the three rank supplies differently. They respond to the
+baseline climate in opposite ways:
+
+- **GDD10** change grows with how warm a site already is (mean ~480 °C-days
+  where SU is under 30 days today, ~880 where it is over 150), so it mostly
+  re-ranks places that are already hot.
+- **GSL** saturates: 142 supplies already have a season of 360+ days, and its
+  change drops to ~1 day at the warmest sites.
+- **SU** change peaks at moderate baselines (~42-49 days where 30-150 days are
+  above 25 °C today) and is smaller at both the coldest (~36) and hottest
+  (~29) sites.
+
+`r if (!use_nps_basemaps) "*NPS Park Tiles are not shown because NPS_BASEMAP_TOKEN is not set; the map uses mapview's default basemaps.*"`
+
+The three maps are synchronized: panning or zooming one moves the others.
+
+```{r map-change}
+# One map per metric, each on the NPS basemaps when the token is set.
+change_map <- function(column, label) {
+  m <- mapview(exp_sf, zcol = column, layer.name = label, map.types = NULL)
+  if (use_nps_basemaps) add_nps_basemaps(m) else m
+}
+
+m_su <- change_map("raw_su_change_p90", "SU change p90 (days)")
+m_gdd10 <- change_map("raw_gdd10_change_p90", "GDD10 change p90 (C d)")
+m_gsl <- change_map("raw_gsl_change_p90", "GSL change p90 (days)")
+
+leafsync::sync(m_su, m_gdd10, m_gsl, ncol = 3)
+```
+
+# RECOMMENDATION: SU (DAYS ABOVE 25 °C)
+
+Use **SU**. It is the only option with a threshold tied to the bloom mechanism:
+it counts days above 25 °C, near the growth optima of bloom-forming
+cyanobacteria, so a change in SU is a change in bloom-favourable days. Its
+pattern also fits an exposure indicator: it is largest where supplies are newly
+crossing into that range, which is where bloom risk is emerging. GDD10 has no
+threshold and mostly rewards heat that already exists, and GSL measures the
+general growing season (above 5 °C) and runs out of room at a tenth of the
+supplies.
+
+Limits: SU is air, not water, temperature; it applies to surface-water sources
+only; and nutrients, not temperature, are the main driver of blooms. SU change
+is small at the hottest sites because they are already above 25 °C most of the
+year.

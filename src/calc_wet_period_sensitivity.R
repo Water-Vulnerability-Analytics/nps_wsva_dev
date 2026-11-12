@@ -4,14 +4,14 @@
 #' Calculates the historical trend in the yearly maximum number of
 #' consecutive wet days (CWD) at each water supply, from the historical runs
 #' of the LOCA2 precipitation-extremes data processed by
-#' [process_precip_period_data()]. For each model and ensemble member, the
+#' [process_extreme_precip_data()]. For each model and ensemble member, the
 #' trend is Sen's slope ([trend::sens.slope()]), tested with Mann-Kendall
 #' ([trend::mk.test()]), in days per year and as a percentage of that run's
 #' historical mean per year.
 #'
 #' The ensemble is then summarized per site: the runs closest to the 10th,
 #' 50th and 90th percentiles of each slope, and the percentage of runs with
-#' a shortening (and a significantly shortening) trend. Shortening wet
+#' a lengthening (and a significantly lengthening) trend. Lengthening wet
 #' spells mean more sensitivity. Only the percent slope is standardized, so
 #' the days per year are not counted twice.
 #'
@@ -19,7 +19,7 @@
 #'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files. Required.
 #' @param period_data String. The folder of parquet files from
-#'   [process_precip_period_data()]. Stops with an error if it doesn't exist
+#'   [process_extreme_precip_data()]. Stops with an error if it doesn't exist
 #'   or the files lack the expected columns. Default:
 #'   `rapid/inputs/loca_cmip6_precip_periods_water_supplies` in the shared
 #'   data folder, see [npswavacore::wava_data_path()].
@@ -51,23 +51,23 @@
 #'     of the model run closest to that percentile;
 #'   * `raw_cwd_percent_slope_p10`, `_p50`, `_p90`: the same for the percent
 #'     slope (% per year);
-#'   * `raw_cwd_trend_models_showing_decrease` and
-#'     `raw_cwd_trend_models_significant_decrease` (Mann-Kendall p < 0.05):
+#'   * `raw_cwd_trend_models_showing_increase` and
+#'     `raw_cwd_trend_models_significant_increase` (Mann-Kendall p < 0.05):
 #'     percentages of runs; `raw_cwd_trend_model_count`: the number of runs;
 #'     `cwd_median_years_used`;
 #'   * `norm_*` and `rank_*` versions of the percent slopes and of
-#'     `raw_cwd_trend_models_showing_decrease`, from
-#'     [add_standardized_indicators()]. The percent slopes are inverted, so
-#'     shortening spells get a higher score.
+#'     `raw_cwd_trend_models_showing_increase`, from
+#'     [add_standardized_indicators()]. Lengthening spells get a higher
+#'     score.
 #' @export
 #' @seealso [calc_dry_period_sensitivity()], the paired dry spell indicator;
 #'   [calc_wet_period_exposure()] for the projected change;
-#'   [process_precip_period_data()], which makes the input files.
+#'   [process_extreme_precip_data()], which makes the input files.
 #' @examplesIf dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies"))
 #' ws <- npswavacore::get_wsd(park = "ZION")
 #' wet_sen <- calc_wet_period_sensitivity(ws, historical = c(1980, 2010))
 #' wet_sen[, c("wsd_source_id", "raw_cwd_percent_slope_p50",
-#'             "raw_cwd_trend_models_showing_decrease")]
+#'             "raw_cwd_trend_models_showing_increase")]
 
 calc_wet_period_sensitivity <- function(
     water_supplies,
@@ -236,12 +236,12 @@ calc_wet_period_sensitivity <- function(
           closest_value(cwd_percent_slope, percent_slope_quantiles[[2]]),
         raw_cwd_percent_slope_p90 =
           closest_value(cwd_percent_slope, percent_slope_quantiles[[3]]),
-        raw_cwd_trend_models_showing_decrease =
-          100 * sum(cwd_percent_slope < 0) / .N,
-        raw_cwd_trend_models_significant_decrease =
+        raw_cwd_trend_models_showing_increase =
+          100 * sum(cwd_percent_slope > 0) / .N,
+        raw_cwd_trend_models_significant_increase =
           100 *
             sum(
-              cwd_percent_slope < 0 & mk_p_value < 0.05,
+              cwd_percent_slope > 0 & mk_p_value < 0.05,
               na.rm = TRUE
             ) /
             .N,
@@ -253,14 +253,11 @@ calc_wet_period_sensitivity <- function(
   ]
 
   final_results <- summary_dt |>
-    # Decreasing historical CWD indicates greater sensitivity. Standardize
+    # Increasing historical CWD indicates greater sensitivity. Standardize
     # only percent slope so absolute days/year are not double-counted.
+    add_standardized_indicators("raw_cwd_percent_slope_p") |>
     add_standardized_indicators(
-      "raw_cwd_percent_slope_p",
-      invert = TRUE
-    ) |>
-    add_standardized_indicators(
-      "raw_cwd_trend_models_showing_decrease"
+      "raw_cwd_trend_models_showing_increase"
     ) |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
 

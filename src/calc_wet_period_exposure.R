@@ -4,23 +4,22 @@
 #' Calculates the change in the yearly maximum number of consecutive wet
 #' days (CWD) at each water supply between a historical and a future period,
 #' from the LOCA2 precipitation-extremes data processed by
-#' [process_precip_period_data()]. For each model and ensemble member, the
+#' [process_extreme_precip_data()]. For each model and ensemble member, the
 #' historical mean comes from its historical run and the future mean from
 #' each scenario run. The change is the future mean minus the historical
 #' mean, in days and as a percentage of the historical mean.
 #'
 #' The ensemble is then summarized per site: the runs closest to the 10th,
 #' 50th and 90th percentiles of each change, and the percentage of runs with
-#' shorter wet spells. Shorter wet spells mean more exposure: fewer wet days
-#' in a row reduce sustained wet-period water and add to the drier
-#' precipitation regime that [calc_dry_period_exposure()] measures. Only the percent
-#' change is standardized, so the days are not counted twice.
+#' longer wet spells. Longer wet spells mean more exposure: more wet days in a
+#' row saturate soils and raise flood and water-quality stress. Only the
+#' percent change is standardized, so the days are not counted twice.
 #'
 #' @param water_supplies sf object. The water supplies, with `wsd_source_id`
 #'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files. Required.
 #' @param period_data String. The folder of parquet files from
-#'   [process_precip_period_data()]. Stops with an error if it doesn't exist
+#'   [process_extreme_precip_data()]. Stops with an error if it doesn't exist
 #'   or the files lack the expected columns. Default:
 #'   `rapid/inputs/loca_cmip6_precip_periods_water_supplies` in the shared
 #'   data folder, see [npswavacore::wava_data_path()].
@@ -55,23 +54,22 @@
 #'     the model run closest to that percentile;
 #'   * `raw_cwd_percent_change_p10`, `_p50`, `_p90`: the same for the percent
 #'     change;
-#'   * `raw_cwd_change_models_showing_decrease`: the percentage of runs with
-#'     shorter wet spells; `raw_cwd_change_model_count`: the number of runs;
+#'   * `raw_cwd_change_models_showing_increase`: the percentage of runs with
+#'     longer wet spells; `raw_cwd_change_model_count`: the number of runs;
 #'   * `norm_*` and `rank_*` versions of the percent changes and of
-#'     `raw_cwd_change_models_showing_decrease`, from
-#'     [add_standardized_indicators()]. The percent changes are inverted, so
-#'     shorter spells get a higher score.
+#'     `raw_cwd_change_models_showing_increase`, from
+#'     [add_standardized_indicators()]. Longer spells get a higher score.
 #' @export
 #' @seealso [calc_dry_period_exposure()], the paired dry spell indicator;
 #'   [calc_wet_period_sensitivity()] for the historical trend;
-#'   [process_precip_period_data()], which makes the input files.
+#'   [process_extreme_precip_data()], which makes the input files.
 #' @examplesIf dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies"))
 #' ws <- npswavacore::get_wsd(park = "ZION")
 #' wet_exp <- calc_wet_period_exposure(ws,
 #'                                     historical = c(1980, 2010),
 #'                                     future = c(2035, 2065))
 #' wet_exp[, c("wsd_source_id", "raw_cwd_percent_change_p50",
-#'             "raw_cwd_change_models_showing_decrease")]
+#'             "raw_cwd_change_models_showing_increase")]
 
 calc_wet_period_exposure <- function(
     water_supplies,
@@ -255,8 +253,8 @@ calc_wet_period_exposure <- function(
           closest_value(cwd_percent_change, percent_quantiles[[2]]),
         raw_cwd_percent_change_p90 =
           closest_value(cwd_percent_change, percent_quantiles[[3]]),
-        raw_cwd_change_models_showing_decrease =
-          100 * sum(cwd_percent_change < 0) / .N,
+        raw_cwd_change_models_showing_increase =
+          100 * sum(cwd_percent_change > 0) / .N,
         raw_cwd_change_model_count = .N
       )
     },
@@ -264,14 +262,11 @@ calc_wet_period_exposure <- function(
   ]
 
   final_results <- summary_dt |>
-    # Shorter projected wet spells indicate greater exposure. Standardize only
+    # Longer projected wet spells indicate greater exposure. Standardize only
     # percent change so the parallel absolute-day fields are not double-counted.
+    add_standardized_indicators("raw_cwd_percent_change_p") |>
     add_standardized_indicators(
-      "raw_cwd_percent_change_p",
-      invert = TRUE
-    ) |>
-    add_standardized_indicators(
-      "raw_cwd_change_models_showing_decrease"
+      "raw_cwd_change_models_showing_increase"
     ) |>
     dplyr::select(wsd_source_id, park_unit, dplyr::everything())
 
