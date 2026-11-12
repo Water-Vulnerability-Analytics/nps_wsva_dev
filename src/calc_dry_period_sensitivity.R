@@ -4,7 +4,7 @@
 #' Calculates the historical trend in the yearly maximum number of
 #' consecutive dry days (CDD) at each water supply, from the historical runs
 #' of the LOCA2 precipitation-extremes data processed by
-#' [process_precip_period_data()]. For each model and ensemble member, the
+#' [process_extreme_precip_data()]. For each model and ensemble member, the
 #' trend is Sen's slope ([trend::sens.slope()]), tested with Mann-Kendall
 #' ([trend::mk.test()]), in days per year and as a percentage of that run's
 #' historical mean per year.
@@ -19,7 +19,7 @@
 #'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files. Required.
 #' @param period_data String. The folder of parquet files from
-#'   [process_precip_period_data()]. Stops with an error if it doesn't exist
+#'   [process_extreme_precip_data()]. Stops with an error if it doesn't exist
 #'   or the files lack the expected columns. Default:
 #'   `rapid/inputs/loca_cmip6_precip_periods_water_supplies` in the shared
 #'   data folder, see [npswavacore::wava_data_path()].
@@ -62,7 +62,7 @@
 #' @export
 #' @seealso [calc_wet_period_sensitivity()], the paired wet spell indicator;
 #'   [calc_dry_period_exposure()] for the projected change;
-#'   [process_precip_period_data()], which makes the input files.
+#'   [process_extreme_precip_data()], which makes the input files.
 #' @examplesIf dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies"))
 #' ws <- npswavacore::get_wsd(park = "ZION")
 #' dry_sen <- calc_dry_period_sensitivity(ws, historical = c(1980, 2010))

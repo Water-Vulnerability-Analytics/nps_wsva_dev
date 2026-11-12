@@ -4,7 +4,7 @@
 #' Calculates the change in the yearly maximum number of consecutive dry
 #' days (CDD) at each water supply between a historical and a future period,
 #' from the LOCA2 precipitation-extremes data processed by
-#' [process_precip_period_data()]. For each model and ensemble member, the
+#' [process_extreme_precip_data()]. For each model and ensemble member, the
 #' historical mean comes from its historical run and the future mean from
 #' each scenario run. The change is the future mean minus the historical
 #' mean, in days and as a percentage of the historical mean.
@@ -18,7 +18,7 @@
 #'   and `park_unit` columns, e.g. from [npswavacore::get_wsd()]. Only their IDs
 #'   are used, to pick rows from the processed files. Required.
 #' @param period_data String. The folder of parquet files from
-#'   [process_precip_period_data()]. Stops with an error if it doesn't exist
+#'   [process_extreme_precip_data()]. Stops with an error if it doesn't exist
 #'   or the files lack the expected columns. Default:
 #'   `rapid/inputs/loca_cmip6_precip_periods_water_supplies` in the shared
 #'   data folder, see [npswavacore::wava_data_path()].
@@ -61,7 +61,7 @@
 #' @export
 #' @seealso [calc_wet_period_exposure()], the paired wet spell indicator;
 #'   [calc_dry_period_sensitivity()] for the historical trend;
-#'   [process_precip_period_data()], which makes the input files.
+#'   [process_extreme_precip_data()], which makes the input files.
 #' @examplesIf dir.exists(npswavacore::wava_data_path("rapid", "inputs", "loca_cmip6_precip_periods_water_supplies"))
 #' ws <- npswavacore::get_wsd(park = "ZION")
 #' dry_exp <- calc_dry_period_exposure(ws,
