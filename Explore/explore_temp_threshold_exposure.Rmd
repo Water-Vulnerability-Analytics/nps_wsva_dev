@@ -83,15 +83,20 @@ baseline climate in opposite ways:
 
 `r if (!use_nps_basemaps) "*NPS Park Tiles are not shown because NPS_BASEMAP_TOKEN is not set; the map uses mapview's default basemaps.*"`
 
-```{r map-change}
-change_map <- mapview(exp_sf, zcol = "raw_su_change_p90", layer.name = "SU change p90 (days)",
-                      map.types = NULL) +
-  mapview(exp_sf, zcol = "raw_gdd10_change_p90", layer.name = "GDD10 change p90 (C d)",
-          map.types = NULL, hide = TRUE) +
-  mapview(exp_sf, zcol = "raw_gsl_change_p90", layer.name = "GSL change p90 (days)",
-          map.types = NULL, hide = TRUE)
+The three maps are synchronized: panning or zooming one moves the others.
 
-if (use_nps_basemaps) add_nps_basemaps(change_map) else change_map
+```{r map-change}
+# One map per metric, each on the NPS basemaps when the token is set.
+change_map <- function(column, label) {
+  m <- mapview(exp_sf, zcol = column, layer.name = label, map.types = NULL)
+  if (use_nps_basemaps) add_nps_basemaps(m) else m
+}
+
+m_su <- change_map("raw_su_change_p90", "SU change p90 (days)")
+m_gdd10 <- change_map("raw_gdd10_change_p90", "GDD10 change p90 (C d)")
+m_gsl <- change_map("raw_gsl_change_p90", "GSL change p90 (days)")
+
+leafsync::sync(m_su, m_gdd10, m_gsl, ncol = 3)
 ```
 
 # RECOMMENDATION: SU (DAYS ABOVE 25 °C)
