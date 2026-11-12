@@ -73,9 +73,14 @@ baseline climate in opposite ways:
   (~29) sites.
 
 ```{r map-change}
-mapview(exp_sf, zcol = "raw_su_change_p90", layer.name = "SU change p90 (days)") +
-  mapview(exp_sf, zcol = "raw_gdd10_change_p90", layer.name = "GDD10 change p90 (C d)", hide = TRUE) +
-  mapview(exp_sf, zcol = "raw_gsl_change_p90", layer.name = "GSL change p90 (days)", hide = TRUE)
+add_nps_basemaps(
+  mapview(exp_sf, zcol = "raw_su_change_p90", layer.name = "SU change p90 (days)",
+          map.types = NULL) +
+    mapview(exp_sf, zcol = "raw_gdd10_change_p90", layer.name = "GDD10 change p90 (C d)",
+            map.types = NULL, hide = TRUE) +
+    mapview(exp_sf, zcol = "raw_gsl_change_p90", layer.name = "GSL change p90 (days)",
+            map.types = NULL, hide = TRUE)
+)
 ```
 
 # RECOMMENDATION: SU (DAYS ABOVE 25 °C)
