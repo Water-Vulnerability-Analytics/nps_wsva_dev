@@ -163,6 +163,33 @@ swe_exp <- calc_swe_exposure(water_supplies = water_supplies,
 # 9.5 minutes for 1148 water sources when hindcast = TRUE
 ```
 
+### Flood 
+
+Three precipitation-extreme metrics from the revised LOCA2 (v20240915) dataset,
+chosen so the result is not biased toward one flood mechanism. Two are pluvial
+(flash-flood) signals and one is fluvial (riverine):
+
+- `prmax1day` -- annual highest 1-day total (Rx1day), pluvial **intensity**.
+  Scored on percent change.
+- `pr99days` -- annual days over the model's own 1951-1980 wet-day 99th
+  percentile, pluvial **frequency**. Scored on **absolute** change, because the
+  historical mean is under one day per year at most supplies and a percent
+  change off that baseline is unstable.
+- `prmax5day` -- annual highest 5-day total (Rx5day), fluvial **accumulation**.
+  Scored on percent change.
+
+```{r}
+flood_exp <- calc_flood_exposure(water_supplies = water_supplies,
+                                 flood_data = "data/rapid/inputs/loca_cmip6_precip_periods_water_supplies/",
+                                 historical = c(1980, 2010),
+                                 future = c(2035, 2065),
+                                 save = TRUE,
+                                 output_dir = "data/rapid/outputs/",
+                                 verbose = TRUE)
+```
+
+
+
 ## Drought as SPEI
 
 ```{r}
@@ -290,6 +317,31 @@ temp_exp <- calc_temp_exposure(water_supplies,
                                save = TRUE,
                                output_dir = "data/rapid/outputs/",
                                verbose = TRUE)
+```
+
+### Warm-Water Temperature Thresholds
+
+Air-temperature surrogates for surface water warming toward algal-bloom
+conditions, from the CMIP6-LOCA2 thresholds collection. They apply to surface
+water supplies and modify bloom risk; they don't represent nutrient loading.
+
+- `su` -- summer days (maximum above 25 C), hot-day **frequency**.
+- `gdd10` -- growing degree days above 10 C, cumulative **heat**.
+- `gsl` -- growing season length (5 C threshold), warm-season **length**.
+  Reaches about 365 days in the warmest places.
+
+All three are scored on **absolute** change. Percent change inflates cool,
+high-elevation supplies with near-zero baselines (a Rocky Mountain supply with
+under 2 historical summer days shows over +1,000%).
+
+```{r}
+temp_threshold_exp <- calc_temp_threshold_exposure(water_supplies = water_supplies,
+                                                   temp_threshold_data = "data/rapid/inputs/loca_cmip6_temp_threshold_water_supplies/",
+                                                   historical = c(1980, 2010),
+                                                   future = c(2035, 2065),
+                                                   save = TRUE,
+                                                   output_dir = "data/rapid/outputs/",
+                                                   verbose = TRUE)
 ```
 
 ## Water Rights
@@ -501,25 +553,6 @@ visitation_sen <- calc_visitation_sensitivity(water_supplies,
          norm_avg_visitation, norm_scaled_trend_visitation)
 ```
 
-## Groundwater Depth
-
-Depth-to-water sensitivity for all water supplies. Groundwater/spring-sourced
-supplies get a depth from the WSD's recorded `well_depth` (assumed to sit 20%
-shallower than the well bottom, i.e. `well_depth * 0.8`) where available,
-falling back to modeled water table depth (WTD) from the CONUS-wide RF WTD
-model (Zenodo 18504963); all other (non-groundwater/spring) source types are
-hardcoded to a depth of 0.
-
-```{r}
-groundwater_depth_sen <- calc_groundwater_depth_sensitivity(
-  water_supplies   = water_supplies,
-  groundwater_data = "data/rapid/inputs/groundwater_depth/wtd_all_sites.csv",
-  save             = TRUE,
-  output_dir       = "data/rapid/outputs/",
-  verbose          = TRUE
-)
-```
-
 # MWBM Explorer
 
 ## Water Rights
@@ -550,13 +583,19 @@ storm_surge_sen <- calc_storm_surge_sensitivity(water_supplies = water_supplies,
                                                 verbose = TRUE)
 ```
 
-# Testing
+## Groundwater Depth
 
-Filter to Utah parks for testing
+Depth-to-water sensitivity for all water supplies. Groundwater/spring-sourced
+supplies get a depth from the WSD's recorded `well_depth` (assumed to sit 20%
+shallower than the well bottom, i.e. `well_depth * 0.8`) where available,
+falling back to modeled water table depth (WTD) from the CONUS-wide RF WTD
+model (Zenodo 18504963); all other (non-groundwater/spring) source types are
+hardcoded to a depth of 0.
 
 ```{r}
-climate_summary <- calc_loca2_change_summary(water_supplies = water_supplies,
-                                             hindcast = TRUE,
-                                             save = TRUE,
-                                             output_dir = "data/rapid/outputs/")
+indicator_weights <- calc_indicator_weights(water_supplies   = water_supplies,
+                                            groundwater_data = "data/rapid/inputs/groundwater_depth/wtd_all_sites.csv",
+                                            save             = TRUE,
+                                            output_dir       = "data/rapid/outputs/",
+                                            verbose          = TRUE)
 ```
